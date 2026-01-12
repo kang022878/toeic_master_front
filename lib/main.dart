@@ -6,7 +6,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'pages/study_page.dart';
 import 'pages/test_center_page.dart';
-import 'pages/ai_recommender_page.dart';
+//import 'pages/ai_recommender_page.dart';
 import 'pages/my_page.dart';
 
 Future<void> main() async {
@@ -139,7 +139,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         nickname: _nickname,
       ),
       const TestCenterPage(),
-      const AiRecommenderPage(),
+      //const AiRecommenderPage(),
       MyPage(
         isLoggedIn: _isLoggedIn,
         email: _email,
@@ -192,7 +192,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.edit_note), label: '스터디'),
           BottomNavigationBarItem(icon: Icon(Icons.home), label: '고사장'),
-          BottomNavigationBarItem(icon: Icon(Icons.smart_toy), label: 'AI 추천'),
+          //BottomNavigationBarItem(icon: Icon(Icons.smart_toy), label: 'AI 추천'),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: '마이페이지'),
         ],
       ),
