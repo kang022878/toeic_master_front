@@ -410,6 +410,12 @@ class _StudyPageState extends State<StudyPage> {
     }
   }
 
+  static const Map<String, String> _studyTypeKoToEn = {
+    '온라인': 'ONLINE',
+    '오프라인': 'OFFLINE',
+    '혼합': 'HYBRID',
+  };
+
   Widget _buildStudyListItem(Map<String, dynamic> study, {required bool isSearchTab, bool isOwner = false}) {
     final currentMembers = study['currentMembers'] ?? 0;
     final maxMembers = study['maxMembers'] ?? 0;
@@ -876,7 +882,7 @@ class _StudyPageState extends State<StudyPage> {
     final TextEditingController scoreController = TextEditingController();
     final TextEditingController contentController = TextEditingController();
     String meetingFrequency = '주 2회';
-    String studyType = 'ONLINE';
+    String studyTypeKo = '온라인';
     final TextEditingController peopleController = TextEditingController();
     bool isCreating = false;
 
@@ -900,8 +906,8 @@ class _StudyPageState extends State<StudyPage> {
                   _buildDialogTextField('목표 점수', scoreController, '점수 입력', isNumber: true),
                   _buildDialogDropdown('모임 횟수', meetingFrequency, ['주 1회', '주 2회', '주 3회', '주 4회', '주 5회', '주 6회', '매일'],
                       (val) => setDialogState(() => meetingFrequency = val!)),
-                  _buildDialogDropdown('형태', studyType, ['ONLINE', 'OFFLINE', 'HYBRID'],
-                      (val) => setDialogState(() => studyType = val!)),
+                  _buildDialogDropdown('형태', studyTypeKo, ['온라인', '오프라인', '병행'],
+                      (val) => setDialogState(() => studyTypeKo = val!)),
                   _buildDialogTextField('모집 인원', peopleController, '인원수 입력', isNumber: true),
                   const SizedBox(height: 10),
                   TextField(
@@ -936,7 +942,7 @@ class _StudyPageState extends State<StudyPage> {
                                 region: city,
                                 targetScore: int.tryParse(scoreController.text),
                                 maxMembers: int.tryParse(peopleController.text),
-                                studyType: studyType,
+                                studyType: _studyTypeKoToEn[studyTypeKo],
                                 meetingFrequency: meetingFrequency,
                               );
 
