@@ -21,7 +21,19 @@ class StudyPage extends StatefulWidget {
 
 class _StudyPageState extends State<StudyPage> {
   bool _isSearching = true;
-  String _selectedCategory = 'TOEIC';
+
+  String? _selectedExamType; // null = 전체
+  String? _selectedRegion;   // null = 전체
+
+  static const List<String> _examTypes = [
+    'TOEIC', 'TOEFL', 'TEPS', 'OPIc'
+  ];
+
+  static const List<String> _regions = [
+    '서울', '대전', '부산', '인천', '광주', '대구', '울산', '세종',
+    '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주'
+  ];
+  
   String _searchQuery = '';
 
   late final TokenStorage _tokenStorage;
@@ -78,6 +90,93 @@ class _StudyPageState extends State<StudyPage> {
     }
   }
 
+  void _resetAndReloadStudies() {
+    _currentPage = 0;
+    _hasMoreStudies = true;
+    _loadStudies(refresh: true);
+  }
+
+  Widget _buildFilterButton({
+    required String title,
+    required String value,
+    required VoidCallback onTap,
+  }) {
+    return OutlinedButton(
+      onPressed: onTap,
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+        side: BorderSide(color: Colors.grey[300]!),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        backgroundColor: Colors.white,
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Flexible(
+            child: Text(
+              '$title: $value',
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.w600),
+            ),
+          ),
+          const Icon(Icons.keyboard_arrow_down, color: Colors.black54),
+        ],
+      ),
+    );
+  }
+
+  /// return 값:
+  /// - null: 취소
+  /// - ''  : '전체' 선택
+  /// - 그 외: 선택 값
+  Future<String?> _showSelectSheet({
+    required String title,
+    required List<String> items,
+    required String? current,
+  }) async {
+    return showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        final allItems = ['전체', ...items];
+        return SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.65,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: allItems.length,
+                    itemBuilder: (context, index) {
+                      final v = allItems[index];
+                      final isAll = v == '전체';
+                      final selected = isAll ? (current == null) : (current == v);
+
+                      return ListTile(
+                        title: Text(v),
+                        trailing: selected ? const Icon(Icons.check, color: Colors.green) : null,
+                        onTap: () => Navigator.pop(context, isAll ? '' : v),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _loadStudies({bool refresh = false}) async {
     if (_isLoadingStudies) return;
     if (!refresh && !_hasMoreStudies) return;
@@ -88,7 +187,8 @@ class _StudyPageState extends State<StudyPage> {
       final page = refresh ? 0 : _currentPage;
       final res = await _api.getStudies(
         keyword: _searchQuery.isNotEmpty ? _searchQuery : null,
-        examType: _searchQuery.isEmpty ? null : _selectedCategory,
+        examType: _selectedExamType,   // null이면 전체
+        region: _selectedRegion,       // null이면 전체 (※ api.dart 지원 필요)
         page: page,
         size: 20,
       );
@@ -290,19 +390,42 @@ class _StudyPageState extends State<StudyPage> {
             ),
           ),
           const SizedBox(height: 15),
-          Wrap(
-            spacing: 8,
-            children: ['TOEIC', 'TOEFL', 'TEPS', 'OPIc']
-                .map((cat) => ChoiceChip(
-                      label: Text(cat),
-                      selected: _selectedCategory == cat,
-                      onSelected: (_) {
-                        setState(() => _selectedCategory = cat);
-                        _loadStudies(refresh: true);
-                      },
-                      selectedColor: const Color(0xFFCDE1AF),
-                    ))
-                .toList(),
+          Row(
+            children: [
+              Expanded(
+                child: _buildFilterButton(
+                  title: '지역',
+                  value: _selectedRegion ?? '전체',
+                  onTap: () async {
+                    final picked = await _showSelectSheet(
+                      title: '지역 선택',
+                      items: _regions,
+                      current: _selectedRegion,
+                    );
+                    if (picked == null) return; // 취소
+                    setState(() => _selectedRegion = picked.isEmpty ? null : picked);
+                    _resetAndReloadStudies();
+                  },
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildFilterButton(
+                  title: '시험 종류',
+                  value: _selectedExamType ?? '전체',
+                  onTap: () async {
+                    final picked = await _showSelectSheet(
+                      title: '시험 종류 선택',
+                      items: _examTypes,
+                      current: _selectedExamType,
+                    );
+                    if (picked == null) return;
+                    setState(() => _selectedExamType = picked.isEmpty ? null : picked);
+                    _resetAndReloadStudies();
+                  },
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 15),
           Expanded(
