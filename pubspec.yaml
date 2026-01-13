@@ -33,3 +33,8 @@ flutter:
   assets:
     - .env
     - assets/examtalk_logo.png
+
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/app_icon.png"
