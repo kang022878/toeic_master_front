@@ -1322,7 +1322,7 @@ class TestCenterPageState extends State<TestCenterPage> {
                                 const SizedBox(height: 14),
                                 for (final r in reviews) ...[
                                   _buildReviewCard(school: school, r: r, setSheetState: setSheetState),
-                                  const Divider(height: 20),
+                                  const Divider(height: 14),
                                 ],
                               ],
                             ),
@@ -1542,7 +1542,7 @@ class TestCenterPageState extends State<TestCenterPage> {
             Expanded(
               child: Text(
                 r.authorNickname,
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -1576,7 +1576,7 @@ class TestCenterPageState extends State<TestCenterPage> {
               ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 2),
 
         Wrap(
           spacing: 6,
@@ -1605,7 +1605,14 @@ class TestCenterPageState extends State<TestCenterPage> {
           ],
         ),
 
-        const SizedBox(height: 14),
+        const SizedBox(height: 10),
+
+        Text(
+          r.content,
+          style: const TextStyle(fontSize: 14, color: Colors.black87, height: 1.3),
+        ),
+
+        const SizedBox(height: 10),
 
         if (firstImage != null) ...[
           ClipRRect(
@@ -1683,12 +1690,12 @@ class TestCenterPageState extends State<TestCenterPage> {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: borderColor, width: 1),
+        border: Border.all(color: borderColor, width: 0.8),
         color: Colors.transparent,
       ),
       child: Text(
         text,
-        style: TextStyle(fontSize: 12,color: textColor, fontWeight: FontWeight.w600),
+        style: TextStyle(fontSize: 10,color: textColor, fontWeight: FontWeight.w600),
       ),
     );
   }
