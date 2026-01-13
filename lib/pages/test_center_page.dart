@@ -56,6 +56,7 @@ class ReviewItem {
   final String content;
   final int likeCount;
   final List<String> imageUrls;
+  final bool liked;
 
   const ReviewItem({
     required this.id,
@@ -68,6 +69,7 @@ class ReviewItem {
     required this.content,
     required this.likeCount,
     required this.imageUrls,
+    required this.liked,
   });
 
   factory ReviewItem.fromJson(Map<String, dynamic> json) {
@@ -90,6 +92,8 @@ class ReviewItem {
       content: (json['content'] ?? '') as String,
       likeCount: (json['likeCount'] as num?)?.toInt() ?? 0,
       imageUrls: urls,
+      liked: (json['liked'] ?? false) as bool,
+
     );
   }
 }
@@ -105,6 +109,8 @@ class TestCenterPage extends StatefulWidget {
 }
 
 class _TestCenterPageState extends State<TestCenterPage> {
+  final Map<int, bool> _likedByMe = {};      // reviewId -> liked
+  final Map<int, int> _likeCountById = {};   // reviewId -> likeCount
 
   late final ApiClient _apiClient;
   late final Api _api;
@@ -165,6 +171,14 @@ class _TestCenterPageState extends State<TestCenterPage> {
     } finally {
       if (mounted) setState(() => _isLoadingAiSchools = false);
     }
+  }
+
+  Future<void> _likeReview(int reviewId) async {
+    await _apiClient.dio.post('/api/reviews/$reviewId/like');
+  }
+
+  Future<void> _unlikeReview(int reviewId) async {
+    await _apiClient.dio.delete('/api/reviews/$reviewId/like');
   }
 
   Future<void> _refreshScore() async {
@@ -528,6 +542,7 @@ class _TestCenterPageState extends State<TestCenterPage> {
     bool facilityGood = review.facilityGood;
     bool quiet = review.quiet;
     bool accessible = review.accessible;
+    String? contentError;
 
     File? pickedImage;
     String contentText = review.content;
@@ -716,7 +731,7 @@ class _TestCenterPageState extends State<TestCenterPage> {
                                   : () async {
                                 final text = contentText.trim();
                                 if (text.isEmpty) {
-                                  _showSnack('리뷰 내용을 입력해주세요!');
+                                  setStateDialog(() => contentError = '글을 작성하세요'); // ✅ 여기
                                   return;
                                 }
 
@@ -1156,7 +1171,6 @@ class _TestCenterPageState extends State<TestCenterPage> {
     required School school,
     required List<ReviewItem> reviews,
   }) {
-
     if (_isSchoolSheetOpen) return;
     _isSchoolSheetOpen = true;
 
@@ -1167,17 +1181,23 @@ class _TestCenterPageState extends State<TestCenterPage> {
       builder: (context) {
         final distanceText = _distanceTextToSchool(school);
 
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => Navigator.pop(context), // ✅ 상단 빈 공간 터치 시 닫기 기능 복구
-          child: DraggableScrollableSheet(
-            initialChildSize: 0.62,
-            minChildSize: 0.35,
-            maxChildSize: 0.88,
-            builder: (context, scrollController) {
-              return GestureDetector(
-                onTap: () {}, // 시트 내부 터치 시 닫히는 것 방지
-                child: Container(
+        return Stack(
+          children: [
+            // ✅ 배경(빈 공간)만 터치하면 닫기
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => Navigator.pop(context),
+              ),
+            ),
+
+            // ✅ 실제 바텀시트
+            DraggableScrollableSheet(
+              initialChildSize: 0.62,
+              minChildSize: 0.35,
+              maxChildSize: 0.88,
+              builder: (context, scrollController) {
+                return Container(
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
@@ -1201,7 +1221,10 @@ class _TestCenterPageState extends State<TestCenterPage> {
                           children: [
                             Text(
                               school.name,
-                              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                             const SizedBox(height: 6),
                             Text(
@@ -1236,15 +1259,16 @@ class _TestCenterPageState extends State<TestCenterPage> {
                                     bool? ok;
 
                                     if (myReview != null) {
-                                      // ✅ 이미 작성했으면 경고 + 수정하기 유도
                                       final goEdit = await _showAlreadyReviewedDialog();
                                       if (goEdit == true) {
-                                        ok = await _showEditReviewDialog(school: school, review: myReview);
+                                        ok = await _showEditReviewDialog(
+                                          school: school,
+                                          review: myReview,
+                                        );
                                       } else {
                                         ok = false;
                                       }
                                     } else {
-                                      // ✅ 처음이면 작성 다이얼로그
                                       ok = await _showWriteReviewDialog(school: school);
                                     }
 
@@ -1253,23 +1277,34 @@ class _TestCenterPageState extends State<TestCenterPage> {
                                       await _loadSchoolsAndPlaceMarkers();
 
                                       final updatedSchool = _schools.firstWhere(
-                                        (s) => s.id == school.id,
+                                            (s) => s.id == school.id,
                                         orElse: () => school,
                                       );
                                       final newReviews = await _fetchReviewsForSchool(school.id);
-                                      
+
                                       if (!mounted) return;
-                                      _showSchoolBottomSheet(school: updatedSchool, reviews: newReviews);
+                                      _showSchoolBottomSheet(
+                                        school: updatedSchool,
+                                        reviews: newReviews,
+                                      );
                                     }
                                   },
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: const Color(0xFF5E9B4B),
                                     foregroundColor: Colors.white,
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-                                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(22),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 18,
+                                      vertical: 10,
+                                    ),
                                     elevation: 0,
                                   ),
-                                  child: const Text('리뷰 작성하기', style: TextStyle(fontWeight: FontWeight.bold)),
+                                  child: const Text(
+                                    '리뷰 작성하기',
+                                    style: TextStyle(fontWeight: FontWeight.bold),
+                                  ),
                                 ),
                               ],
                             ),
@@ -1287,10 +1322,10 @@ class _TestCenterPageState extends State<TestCenterPage> {
                       ),
                     ],
                   ),
-                ),
-              );
-            },
-          ),
+                );
+              },
+            ),
+          ],
         );
       },
     ).whenComplete(() {
@@ -1415,7 +1450,6 @@ class _TestCenterPageState extends State<TestCenterPage> {
   Widget _buildAiSchoolCard(School s) {
     return InkWell(
       onTap: () async {
-        // 지도 이동
         await _mapController?.updateCamera(
           NCameraUpdate.scrollAndZoomTo(
             target: NLatLng(s.latitude, s.longitude),
@@ -1423,7 +1457,6 @@ class _TestCenterPageState extends State<TestCenterPage> {
           ),
         );
 
-        // 바텀시트 열기
         final reviews = await _fetchReviewsForSchool(s.id);
         if (!mounted) return;
         _showSchoolBottomSheet(school: s, reviews: reviews);
@@ -1438,19 +1471,24 @@ class _TestCenterPageState extends State<TestCenterPage> {
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween, // ✅ 핵심
           children: [
-            Text(
-              s.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.bold),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  s.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _guessRegionFromAddress(s.address),
+                  style: const TextStyle(fontSize: 12, color: Colors.black54),
+                ),
+              ],
             ),
-            const SizedBox(height: 6),
-            Text(
-              _guessRegionFromAddress(s.address),
-              style: const TextStyle(fontSize: 12, color: Colors.black54),
-            ),
-            const Spacer(),
             Text(
               '리뷰 ${s.reviewCount}개 · ⭐ ${s.avgRating.toStringAsFixed(1)}',
               style: const TextStyle(fontSize: 12),
@@ -1469,6 +1507,13 @@ class _TestCenterPageState extends State<TestCenterPage> {
     final isMine = (_myNickname != null &&
         _myNickname!.isNotEmpty &&
         r.authorNickname == _myNickname);
+
+    // ✅ 로컬 상태 초기화(처음 그릴 때만)
+    _likedByMe.putIfAbsent(r.id, () => r.liked);
+    _likeCountById.putIfAbsent(r.id, () => r.likeCount);
+
+    final isLiked = _likedByMe[r.id] ?? false;
+    final likeCount = _likeCountById[r.id] ?? r.likeCount;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1492,14 +1537,10 @@ class _TestCenterPageState extends State<TestCenterPage> {
               ),
             ),
 
-            // ✅ 내 리뷰면 수정 버튼
             if (isMine)
               TextButton.icon(
                 onPressed: () async {
-                  // ✅ 1) 바텀시트 먼저 닫기 (write-review 흐름과 동일하게)
                   _closeSchoolSheetIfOpen();
-
-                  // ✅ 2) 한 프레임 뒤에 다이얼로그 열기 (pop 애니메이션 정리 시간)
                   await Future.delayed(const Duration(milliseconds: 50));
 
                   final ok = await _showEditReviewDialog(school: school, review: r);
@@ -1508,7 +1549,6 @@ class _TestCenterPageState extends State<TestCenterPage> {
                     _showSnack('리뷰가 수정되었습니다');
                     await _loadSchoolsAndPlaceMarkers();
 
-                    // ✅ school 정보(리뷰카운트 등)도 최신으로 가져오기
                     final updatedSchool = _schools.firstWhere(
                           (s) => s.id == school.id,
                       orElse: () => school,
@@ -1544,7 +1584,7 @@ class _TestCenterPageState extends State<TestCenterPage> {
             ),
             _pill(
               r.quiet ? '조용해요' : '시끄러워요',
-              borderColor: r.quiet ? Colors.blue : Colors.red ,
+              borderColor: r.quiet ? Colors.blue : Colors.red,
               textColor: r.quiet ? Colors.blue : Colors.red,
             ),
             _pill(
@@ -1578,24 +1618,47 @@ class _TestCenterPageState extends State<TestCenterPage> {
         ],
 
         Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Expanded(
-              child: Text(
-                r.content,
-                style: const TextStyle(fontSize: 16),
+            IconButton(
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+              padding: EdgeInsets.zero,
+              visualDensity: VisualDensity.compact,
+              onPressed: () async {
+                final prevLiked = _likedByMe[r.id] ?? false;
+                final prevCount = _likeCountById[r.id] ?? r.likeCount;
+
+                // ✅ UI 즉시 반영
+                setState(() {
+                  final nextLiked = !prevLiked;
+                  _likedByMe[r.id] = nextLiked;
+                  _likeCountById[r.id] = nextLiked ? (prevCount + 1) : (prevCount - 1);
+                });
+
+                // ✅ 서버 반영(실패 시 롤백)
+                try {
+                  if (!prevLiked) {
+                    await _likeReview(r.id);
+                  } else {
+                    await _unlikeReview(r.id);
+                  }
+                } catch (e) {
+                  setState(() {
+                    _likedByMe[r.id] = prevLiked;
+                    _likeCountById[r.id] = prevCount;
+                  });
+                  _showSnack('좋아요 처리 실패: $e');
+                }
+              },
+              icon: Icon(
+                isLiked ? Icons.thumb_up : Icons.thumb_up_alt_outlined,
+                size: 18,
+                color: isLiked ? Colors.blue : Colors.black45,
               ),
             ),
-            const SizedBox(width: 10),
-            Row(
-              children: [
-                const Icon(Icons.thumb_up_alt_outlined, size: 18, color: Colors.black45),
-                const SizedBox(width: 4),
-                Text('${r.likeCount}', style: const TextStyle(color: Colors.black54)),
-              ],
-            ),
+            Text('$likeCount', style: const TextStyle(color: Colors.black54)),
           ],
-        ),
+        )
+
       ],
     );
   }
@@ -1627,6 +1690,7 @@ class _TestCenterPageState extends State<TestCenterPage> {
 
     File? pickedImage;
     String contentText = '';
+    String? contentError;
 
     bool submitting = false;
 
@@ -1780,12 +1844,33 @@ class _TestCenterPageState extends State<TestCenterPage> {
                       TextField(
                         minLines: 4,
                         maxLines: 6,
-                        onChanged: (v) => contentText = v,
                         enabled: !submitting,
+                        onChanged: (v) {
+                          contentText = v;
+                          if (contentError != null && v.trim().isNotEmpty) {
+                            setStateDialog(() => contentError = null); // ✅ 입력하면 에러 제거
+                          }
+                        },
                         decoration: InputDecoration(
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                         ),
                       ),
+
+// ✅ TextField 바로 아래에 빨간 에러 문구
+                      // ✅ 버튼 위에 빨간 경고
+                      if (contentError != null) ...[
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Text(
+                            contentError!,
+                            style: const TextStyle(
+                              color: Colors.red,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
 
                       const SizedBox(height: 18),
 
@@ -1815,7 +1900,7 @@ class _TestCenterPageState extends State<TestCenterPage> {
                                   : () async {
                                 final text = contentText.trim();
                                 if (text.isEmpty) {
-                                  _showSnack('리뷰 내용을 입력해주세요!');
+                                  setStateDialog(() => contentError = '리뷰 내용을 작성하세요');
                                   return;
                                 }
 
