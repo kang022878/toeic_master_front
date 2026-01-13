@@ -124,6 +124,8 @@ class MainNavigationScreen extends StatefulWidget {
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _selectedIndex = 0;
 
+  final ValueNotifier<int> _scoreNotifier = ValueNotifier<int>(0);
+
   // ✅ 앱 전체 로그인/프로필 상태 (여기가 “단일 진실”)
   bool _isLoggedIn = false;
   String _email = '';
@@ -132,13 +134,20 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   File? _profileImage;
 
   @override
+  void dispose() {
+    _scoreNotifier.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final pages = [
       StudyPage(
         isLoggedIn: _isLoggedIn,
         nickname: _nickname,
+        scoreNotifier: _scoreNotifier,
       ),
-      const TestCenterPage(),
+      TestCenterPage(scoreNotifier: _scoreNotifier),
       //const AiRecommenderPage(),
       MyPage(
         isLoggedIn: _isLoggedIn,
@@ -146,6 +155,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         nickname: _nickname,
         myGoal: _myGoal,
         profileImage: _profileImage,
+        scoreNotifier: _scoreNotifier,
 
         // ✅ MyPage에서 로그인 성공했을 때 부모 상태 갱신
         onLogin: (email, nickname, goal, image) {

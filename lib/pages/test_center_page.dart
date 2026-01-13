@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -95,7 +96,9 @@ class ReviewItem {
 
 /// ====== Page ======
 class TestCenterPage extends StatefulWidget {
-  const TestCenterPage({super.key});
+  final ValueNotifier<int> scoreNotifier;
+
+  const TestCenterPage({super.key, required this.scoreNotifier,});
 
   @override
   State<TestCenterPage> createState() => _TestCenterPageState();
@@ -107,6 +110,17 @@ class _TestCenterPageState extends State<TestCenterPage> {
   late final Api _api;
 
   NaverMapController? _mapController;
+
+  final FocusNode _searchFocusNode = FocusNode();
+  Timer? _debounce;
+
+  int _restoreToken = 0;
+  bool _isRestoringAll = false;
+
+  // 자동완성 후보(전체 학교 캐시) + 현재 추천 목록
+  List<School> _allSchoolsCache = [];
+  List<School> _suggestions = [];
+  bool _showSuggestions = false;
 
   final TextEditingController _searchController = TextEditingController();
 
@@ -121,13 +135,66 @@ class _TestCenterPageState extends State<TestCenterPage> {
 
   String? _myNickname;
 
+  // ===== AI 추천 고사장 =====
+  List<School> _aiRecommendedSchools = [];
+  bool _isLoadingAiSchools = false;
+
+  Future<void> _loadAiRecommendedSchools() async {
+    setState(() => _isLoadingAiSchools = true);
+    try {
+      final res = await _apiClient.dio.get(
+        '/api/schools/recommendations',
+        queryParameters: {'topK': 2},
+      );
+
+      debugPrint('추천 응답 raw: ${res.data}');
+
+      final decoded = res.data as Map<String, dynamic>;
+      final data = decoded['data'] as List<dynamic>? ?? [];
+
+      final list = data
+          .map((e) => School.fromJson(e as Map<String, dynamic>))
+          .toList();
+
+      debugPrint('추천 파싱 결과 length=${list.length}');
+
+      if (!mounted) return;
+      setState(() => _aiRecommendedSchools = list);
+    } catch (e) {
+      debugPrint('AI 고사장 추천 실패: $e');
+    } finally {
+      if (mounted) setState(() => _isLoadingAiSchools = false);
+    }
+  }
+
+  Future<void> _refreshScore() async {
+    try {
+      // ✅ 서버에서 최신 score 다시 받아오기
+      final res = await _apiClient.dio.get('/api/users/me');
+      final decoded = res.data as Map<String, dynamic>;
+      final data = decoded['data'];
+
+      int? total;
+      if (data is Map<String, dynamic>) {
+        final v = data['score']; // 백엔드 필드명이 score라고 가정 (StudyPage도 score 쓰는 흐름)
+        if (v is num) total = v.toInt();
+      }
+
+      if (total != null) {
+        widget.scoreNotifier.value = total; // ✅ 즉시 반영
+      }
+    } catch (e) {
+      // 실패해도 기능엔 영향 없게 조용히
+      debugPrint('점수 새로고침 실패: $e');
+    }
+  }
+
   void _closeSchoolSheetIfOpen() {
     if (_isSchoolSheetOpen) {
       _isSchoolSheetOpen = false; // ✅ 중요: 닫기 전에 먼저 내려줘야 재오픈 가드에 안 걸림
       Navigator.of(context).pop();
     }
   }
-
 
   @override
   void initState() {
@@ -136,8 +203,44 @@ class _TestCenterPageState extends State<TestCenterPage> {
     _api = Api(_apiClient);
 
     _loadMyPositionSilently();
-
     _loadMyNicknameSilently();
+
+    _loadAiRecommendedSchools();
+
+    _searchController.addListener(_onSearchTextControllerChanged);
+
+    _searchFocusNode.addListener(() {
+      if (!_searchFocusNode.hasFocus) {
+        setState(() => _showSuggestions = false);
+      } else {
+        // 포커스 얻으면 현재 텍스트 기준으로 다시 후보 표시
+        _updateSuggestions(_searchController.text);
+      }
+    });
+  }
+
+  Future<void> _restoreAllSchoolsIfNeeded() async {
+    // 이미 전체 상태면 굳이 다시 안 해도 되지만, 안전하게 적용해도 OK
+    setState(() {
+      _showSuggestions = false;
+    });
+
+    // 캐시가 있으면 캐시로 즉시 복구 (서버 호출 X)
+    if (_allSchoolsCache.isNotEmpty) {
+      await _applySchoolsToMap(_allSchoolsCache);
+      return;
+    }
+
+    // 캐시가 없다면 서버에서 다시 받아오기
+    setState(() => _isLoadingSchools = true);
+    try {
+      final schools = await _fetchAllSchools();
+      if (!mounted) return;
+      _allSchoolsCache = schools;
+      await _applySchoolsToMap(schools);
+    } finally {
+      if (mounted) setState(() => _isLoadingSchools = false);
+    }
   }
 
   Future<void> _loadMyNicknameSilently() async {
@@ -161,7 +264,10 @@ class _TestCenterPageState extends State<TestCenterPage> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
+    _searchController.removeListener(_onSearchTextControllerChanged); // ✅ 추가
     _searchController.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
@@ -189,6 +295,79 @@ class _TestCenterPageState extends State<TestCenterPage> {
       // ignore
     }
   }
+
+  Future<void> _performSearch(String keyword) async {
+    final q = keyword.trim();
+    if (q.isEmpty) return;
+
+    setState(() {
+      _isLoadingSchools = true;
+      _showSuggestions = false;
+    });
+
+    try {
+      final schools = await _searchSchoolsByName(q);
+      if (!mounted) return;
+      await _applySchoolsToMap(schools);
+
+      if (schools.isNotEmpty && _mapController != null) {
+        await _mapController!.updateCamera(
+          NCameraUpdate.scrollAndZoomTo(
+            target: NLatLng(schools.first.latitude, schools.first.longitude),
+            zoom: 14,
+          ),
+        );
+      }
+    } catch (e) {
+      _showSnack('검색 실패: $e');
+    } finally {
+      if (mounted) setState(() => _isLoadingSchools = false);
+    }
+  }
+
+  void _onSearchTextControllerChanged() {
+    final q = _searchController.text.trim();
+
+    // ✅ 텍스트가 비면 AI 추천을 다시 보여주기 위해 리빌드
+    if (q.isEmpty) {
+      // 추천 리스트 숨기고
+      if (_showSuggestions) {
+        setState(() => _showSuggestions = false);
+      } else {
+        setState(() {}); // ✅ 그냥 리빌드
+      }
+    }
+  }
+
+  void _updateSuggestions(String raw) {
+    final q = raw.trim();
+    if (q.isEmpty) {
+      setState(() {
+        _suggestions = [];
+        _showSuggestions = false;
+      });
+      return;
+    }
+
+    final list = _allSchoolsCache
+        .where((s) => s.name.contains(q)) // ✅ "문" 포함이면 다 뜸
+        .take(8) // 너무 길면 UI 부담 → 8개 정도만
+        .toList();
+
+    setState(() {
+      _suggestions = list;
+      _showSuggestions = list.isNotEmpty && _searchFocusNode.hasFocus;
+    });
+  }
+
+  void _onSearchChanged(String text) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 180), () {
+      if (!mounted) return;
+      _updateSuggestions(text);
+    });
+  }
+
 
   /// ====== API: 전체 학교 ======
   Future<List<School>> _fetchAllSchools() async {
@@ -560,6 +739,8 @@ class _TestCenterPageState extends State<TestCenterPage> {
                                     await _uploadReviewImage(reviewId: review.id, imageFile: pickedImage!);
                                   }
 
+                                  await _refreshScore(); // ✅ 리뷰 수정 직후도 반영(만약 점수 정책이 있으면)
+
                                   if (!mounted) return;
                                   Navigator.pop(dialogContext, true);
                                 } catch (e) {
@@ -681,6 +862,10 @@ class _TestCenterPageState extends State<TestCenterPage> {
     try {
       final schools = await _fetchAllSchools();
       if (!mounted) return;
+
+      // ✅ 자동완성용 전체 학교 캐시 저장
+      _allSchoolsCache = schools;
+
       await _applySchoolsToMap(schools);
     } finally {
       if (mounted) setState(() => _isLoadingSchools = false);
@@ -703,6 +888,7 @@ class _TestCenterPageState extends State<TestCenterPage> {
     return Scaffold(
       body: Stack(
         children: [
+
           NaverMap(
             options: const NaverMapViewOptions(
               initialCameraPosition: NCameraPosition(
@@ -754,64 +940,128 @@ class _TestCenterPageState extends State<TestCenterPage> {
   }
 
   Widget _buildSearchBar() {
-    return Material(
-      elevation: 2,
-      borderRadius: BorderRadius.circular(14),
-      child: TextField(
-        controller: _searchController,
-        decoration: InputDecoration(
-          hintText: '고사장 검색',
-          prefixIcon: const Icon(Icons.search),
-          suffixIcon: _searchController.text.isEmpty
-              ? null
-              : IconButton(
-            icon: const Icon(Icons.close),
-            onPressed: () async {
-              _searchController.clear();
-              setState(() {});
-              setState(() => _isLoadingSchools = true);
-              try {
-                final schools = await _fetchAllSchools();
-                if (!mounted) return;
-                await _applySchoolsToMap(schools);
-              } finally {
-                if (mounted) setState(() => _isLoadingSchools = false);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Material(
+          elevation: 2,
+          borderRadius: BorderRadius.circular(14),
+          child: TextField(
+            focusNode: _searchFocusNode,
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: '고사장 검색',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: _searchController.text.isEmpty
+                  ? null
+                  : IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () {
+                  // ✅ 1) 혹시 남아있는 debounce 취소
+                  _debounce?.cancel();
+
+                  // ✅ 2) 텍스트/추천 UI 초기화
+                  _searchController.clear();
+                  _updateSuggestions('');
+                  setState(() => _showSuggestions = false);
+
+                  // ✅ 3) 포커스 복구 (이게 중요!)
+                  FocusScope.of(context).requestFocus(_searchFocusNode);
+
+                  // ✅ 4) 전체 학교 복구는 "스케줄링"만
+                  _scheduleRestoreAllSchools();
+                },
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide.none,
+              ),
+              filled: true,
+              fillColor: Colors.white.withOpacity(0.95),
+            ),
+            onChanged: (text) async {
+              setState(() {}); // suffixIcon 반영
+
+              final q = text.trim();
+
+              // ✅ 글자가 완전히 비면 "전체 학교"로 복구
+              if (q.isEmpty) {
+                _debounce?.cancel();      // 추천 debounce 중이면 취소
+                _updateSuggestions('');   // 추천 목록 숨김
+                _scheduleRestoreAllSchools();
+                return;
               }
+
+              // ✅ 글자가 있으면 자동완성만 갱신 (검색은 엔터/탭으로만)
+              _onSearchChanged(text);
+            },
+            onSubmitted: (q) async {
+              await _performSearch(q);
             },
           ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide.none,
-          ),
-          filled: true,
-          fillColor: Colors.white.withOpacity(0.95),
         ),
-        onChanged: (_) => setState(() {}),
-        onSubmitted: (q) async {
-          final keyword = q.trim();
-          if (keyword.isEmpty) return;
 
-          setState(() => _isLoadingSchools = true);
-          try {
-            final schools = await _searchSchoolsByName(keyword);
-            if (!mounted) return;
-            await _applySchoolsToMap(schools);
+        // ✅ 검색어 없을 때만 AI 추천 고사장 표시
+        if (_searchController.text.isEmpty)
+          _buildAiSchoolRecommendationSection(),
 
-            if (schools.isNotEmpty && _mapController != null) {
-              await _mapController!.updateCamera(
-                NCameraUpdate.scrollAndZoomTo(
-                  target: NLatLng(schools.first.latitude, schools.first.longitude),
-                  zoom: 14,
-                ),
-              );
-            }
-          } catch (e) {
-            _showSnack('검색 실패: $e');
-          } finally {
-            if (mounted) setState(() => _isLoadingSchools = false);
-          }
-        },
-      ),
+        // ✅ 검색 도우미(자동완성) 목록
+        if (_showSuggestions)
+          Container(
+            margin: const EdgeInsets.only(top: 8),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.97),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.black12),
+              boxShadow: const [
+                BoxShadow(
+                  blurRadius: 10,
+                  spreadRadius: 0,
+                  offset: Offset(0, 6),
+                  color: Color(0x22000000),
+                )
+              ],
+            ),
+            constraints: const BoxConstraints(maxHeight: 260),
+            child: ListView.separated(
+              padding: EdgeInsets.zero,
+              shrinkWrap: true,
+              itemCount: _suggestions.length,
+              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemBuilder: (context, i) {
+                final s = _suggestions[i];
+                return ListTile(
+                  dense: true,
+                  title: Text(
+                    s.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    _guessRegionFromAddress(s.address),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onTap: () async {
+                    // ✅ 추천창 먼저 닫기
+                    setState(() => _showSuggestions = false);
+
+                    // ✅ 텍스트 반영
+                    _searchController.text = s.name;
+                    _searchController.selection = TextSelection.fromPosition(
+                      TextPosition(offset: _searchController.text.length),
+                    );
+
+                    // ✅ 키보드 닫기
+                    FocusScope.of(context).unfocus();
+
+                    await _performSearch(s.name);
+                  },
+                );
+              },
+            ),
+          ),
+      ],
     );
   }
 
@@ -872,6 +1122,28 @@ class _TestCenterPageState extends State<TestCenterPage> {
     } finally {
       if (mounted) setState(() => _isMovingToMyLocation = false);
     }
+  }
+
+  void _scheduleRestoreAllSchools() {
+    final token = ++_restoreToken;
+
+    // 이미 복구 중이면 굳이 또 안 돌려도 됨
+    if (_isRestoringAll) return;
+
+    // 다음 프레임에 실행 (입력 처리 먼저 끝내기)
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // 실행 시점에 다시 텍스트가 생겼으면 취소
+      if (!mounted) return;
+      if (_searchController.text.trim().isNotEmpty) return;
+      if (token != _restoreToken) return;
+
+      _isRestoringAll = true;
+      try {
+        await _restoreAllSchoolsIfNeeded();
+      } finally {
+        _isRestoringAll = false;
+      }
+    });
   }
 
   void _showSnack(String msg) {
@@ -1044,6 +1316,149 @@ class _TestCenterPageState extends State<TestCenterPage> {
     if (parts.length >= 2) return '${parts[0]} ${parts[1]}';
     if (parts.isNotEmpty) return parts[0];
     return '';
+  }
+
+  Widget _buildAiSchoolRecommendationSection() {
+    // 로딩 중
+    if (_isLoadingAiSchools) {
+      return Container(
+        margin: const EdgeInsets.only(top: 12),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF1F8E9),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFF8DBB6A)),
+        ),
+        child: Row(
+          children: const [
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 10),
+            Text('AI 추천 고사장 불러오는 중...'),
+          ],
+        ),
+      );
+    }
+
+    // 추천이 비어있음(백엔드가 0개 내려줌)
+    if (_aiRecommendedSchools.isEmpty) {
+      return Container(
+        margin: const EdgeInsets.only(top: 12),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF1F8E9),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFF8DBB6A)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.auto_awesome, size: 18, color: Color(0xFF5E9B4B)),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text(
+                '아직 추천할 고사장이 없어요.\n리뷰를 작성하면 더 정확한 추천을 받을 수 있어요!',
+                style: TextStyle(fontSize: 13, color: Colors.black87),
+              ),
+            ),
+            TextButton(
+              onPressed: _loadAiRecommendedSchools,
+              child: const Text('새로고침'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // 정상 추천
+    return _buildAiSchoolRecommendation();
+  }
+
+  Widget _buildAiSchoolRecommendation() {
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F8E9),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF8DBB6A)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: const [
+              Icon(Icons.auto_awesome, size: 18, color: Color(0xFF5E9B4B)),
+              SizedBox(width: 6),
+              Text(
+                '나에게 맞는 AI 추천 고사장',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          Row(
+            children: _aiRecommendedSchools.map((s) {
+              return Expanded(
+                child: _buildAiSchoolCard(s),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAiSchoolCard(School s) {
+    return InkWell(
+      onTap: () async {
+        // 지도 이동
+        await _mapController?.updateCamera(
+          NCameraUpdate.scrollAndZoomTo(
+            target: NLatLng(s.latitude, s.longitude),
+            zoom: 15,
+          ),
+        );
+
+        // 바텀시트 열기
+        final reviews = await _fetchReviewsForSchool(s.id);
+        if (!mounted) return;
+        _showSchoolBottomSheet(school: s, reviews: reviews);
+      },
+      child: Container(
+        margin: const EdgeInsets.only(right: 8),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.black12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              s.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _guessRegionFromAddress(s.address),
+              style: const TextStyle(fontSize: 12, color: Colors.black54),
+            ),
+            const Spacer(),
+            Text(
+              '리뷰 ${s.reviewCount}개 · ⭐ ${s.avgRating.toStringAsFixed(1)}',
+              style: const TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildReviewCard({
@@ -1416,6 +1831,8 @@ class _TestCenterPageState extends State<TestCenterPage> {
                                     content: text,
                                     imageFile: pickedImage,
                                   );
+
+                                  await _refreshScore(); // ✅ 리뷰 작성 직후 점수 즉시 반영
 
                                   if (!mounted) return;
                                   Navigator.pop(dialogContext, true); 

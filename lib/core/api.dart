@@ -290,4 +290,35 @@ class Api {
     return data['data'] as String; // imageKey 반환
   }
 
+  Future<Map<String, dynamic>> getStudyRecommendations({
+    String? examType,
+    String? region,
+    int? minScore,
+    int? maxScore,
+    int topK = 10,
+  }) async {
+    final queryParams = <String, dynamic>{'topK': topK};
+    if (examType != null && examType.isNotEmpty) queryParams['examType'] = examType;
+    if (region != null && region.isNotEmpty) queryParams['region'] = region;
+    if (minScore != null) queryParams['minScore'] = minScore;
+    if (maxScore != null) queryParams['maxScore'] = maxScore;
+
+    final res = await _client.dio.get(
+      '/api/studies/recommendations',
+      queryParameters: queryParams,
+    );
+    return (res.data as Map<String, dynamic>);
+  }
+
+  Future<Map<String, dynamic>> addScore({
+    required String type, // 'JOIN_STUDY' | 'WRITE_REVIEW'
+    required int refId,
+  }) async {
+    final res = await _client.dio.post(
+      '/api/users/me/score',
+      data: {'type': type, 'refId': refId},
+    );
+    return res.data as Map<String, dynamic>;
+  }
+
 }

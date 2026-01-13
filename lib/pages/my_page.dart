@@ -73,6 +73,8 @@ class MyPage extends StatefulWidget {
   final VoidCallback onLogout;
   final void Function(String nickname, String goal, File? profileImage) onProfileUpdated;
 
+  final ValueNotifier<int> scoreNotifier;
+
   const MyPage({
     super.key,
     required this.isLoggedIn,
@@ -83,6 +85,7 @@ class MyPage extends StatefulWidget {
     required this.onLogin,
     required this.onLogout,
     required this.onProfileUpdated,
+    required this.scoreNotifier,
   });
 
   @override
@@ -90,6 +93,9 @@ class MyPage extends StatefulWidget {
 }
 
 class _MyPageState extends State<MyPage> {
+
+  int _score = 0;
+
   // ✅ 이 페이지 내부에서 “유저별 저장소”는 그대로 유지(로컬 UI용)
   final Map<String, Map<String, dynamic>> _userDataStorage = {};
 
@@ -228,6 +234,7 @@ class _MyPageState extends State<MyPage> {
     String pretty(String s) => s.trim().isEmpty ? '작성해주세요.' : s.trim();
 
     return Container(
+      margin: const EdgeInsets.only(bottom: 18),
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -461,9 +468,8 @@ class _MyPageState extends State<MyPage> {
       final nickname = (data?['nickname'] ?? '닉네임') as String;
       final bio = (data?['bio'] ?? '') as String;
       final tendencyRaw = (data?['tendency'] ?? '') as String;
-
       final profileImageUrl = (data?['profileImageUrl'] as String?)?.trim();
-
+      final score = (data?['score'] as num?)?.toInt() ?? 0;
 
       if (!mounted) return;
 
@@ -472,11 +478,13 @@ class _MyPageState extends State<MyPage> {
         _nickname = nickname;
         _bio = bio;
         _myGoal = bio.isEmpty ? '목표를 적어보세요' : bio;
-
         _profileImageUrl = (profileImageUrl != null && profileImageUrl.isNotEmpty)
             ? profileImageUrl
             : null;
+        _score = score;
       });
+
+      widget.scoreNotifier.value = score;
 
       await _loadTendencies(_email); // 로컬 먼저 로드(오프라인 캐시)
 
@@ -493,6 +501,7 @@ class _MyPageState extends State<MyPage> {
 
         // 로컬 캐시도 서버 값으로 덮어써서 동기화
         await _saveTendencies(_email);
+
       }
 
       // 부모에 로그인 상태 반영
@@ -502,6 +511,30 @@ class _MyPageState extends State<MyPage> {
       // 토큰이 만료/무효면 정리
       await _tokenStorage.clear();
     }
+  }
+
+  int _levelFromScore(int s) {
+    if (s >= 1000) return 5;
+    if (s >= 700) return 4;
+    if (s >= 450) return 3;
+    if (s >= 250) return 2;
+    if (s >= 100) return 1;
+    return 0;
+  }
+
+  int _nextThreshold(int level) {
+    const thresholds = [100, 250, 450, 700, 1000];
+    if (level >= thresholds.length) return thresholds.last;
+    return thresholds[level];
+  }
+
+  double _progressInLevel(int s) {
+    const starts = [0, 100, 250, 450, 700, 1000];
+    final level = _levelFromScore(s);
+    final start = starts[level];
+    final next = _nextThreshold(level);
+    if (next == start) return 1.0;
+    return ((s - start) / (next - start)).clamp(0.0, 1.0);
   }
 
   @override
@@ -590,6 +623,8 @@ class _MyPageState extends State<MyPage> {
       _galleryPage = 0;
     });
 
+    widget.scoreNotifier.value = 0;
+
     widget.onLogout();
   }
 
@@ -605,10 +640,26 @@ class _MyPageState extends State<MyPage> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text('마이페이지', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
         elevation: 0,
-        actions: isLoggedIn
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Image.asset(
+              'assets/examtalk_logo.png',
+              height: 30, // StudyPage랑 동일
+            ),
+            const SizedBox(width: 3),
+            const Text(
+              '마이페이지',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.black,
+              ),
+            ),
+          ],
+        ),
+        actions: widget.isLoggedIn
             ? [
           Padding(
             padding: const EdgeInsets.only(right: 16.0),
@@ -627,8 +678,14 @@ class _MyPageState extends State<MyPage> {
                     children: [
                       Icon(Icons.logout, size: 14, color: Colors.grey),
                       SizedBox(width: 4),
-                      Text('로그아웃',
-                          style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
+                      Text(
+                        '로그아웃',
+                        style: TextStyle(
+                          color: Colors.grey,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -662,8 +719,67 @@ class _MyPageState extends State<MyPage> {
     );
   }
 
+  Widget _buildScoreCard() {
+    return ValueListenableBuilder<int>(
+      valueListenable: widget.scoreNotifier,
+      builder: (context, score, _) {
+        final level = _levelFromScore(score);
+        final next = _nextThreshold(level);
+        final progress = _progressInLevel(score);
+        final remain = (next - score).clamp(0, 1 << 30);
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 10,
+                offset: const Offset(0, 5),
+              )
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '합격 게이지',
+                style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 12),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Text('Lv.$level', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(width: 10),
+                  Text('$score 점',
+                      style: const TextStyle(fontSize: 16, color: Color(0xFF436B2D), fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  Text(remain > 0 ? '다음까지 $remain점' : 'MAX', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                ],
+              ),
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 10,
+                  backgroundColor: const Color(0xFFEFEFEF),
+                  valueColor: const AlwaysStoppedAnimation(Color(0xFF7CB342)),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildLoggedInHeader() {
     return Container(
+      margin: const EdgeInsets.only(bottom: 18),
       width: double.infinity,
       color: const Color(0xFFE1E8DC),
       padding: const EdgeInsets.fromLTRB(24, 10, 24, 24),
@@ -698,6 +814,7 @@ class _MyPageState extends State<MyPage> {
           ),
           const SizedBox(height: 20),
           Container(
+            margin: const EdgeInsets.only(bottom: 18),
             width: double.infinity,
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
@@ -716,7 +833,6 @@ class _MyPageState extends State<MyPage> {
               ],
             ),
           ),
-          const SizedBox(height: 12),
           _buildTendencyCard(),
           SizedBox(
             width: double.infinity,
@@ -970,13 +1086,6 @@ class _MyPageState extends State<MyPage> {
             ),
           ),
           const SizedBox(height: 20),
-          Container(
-            width: double.infinity,
-            height: 120,
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
-            child: const Text('나의 목표', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black54)),
-          ),
         ],
       ),
     );
