@@ -642,6 +642,7 @@ class _MyPageState extends State<MyPage> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
+        toolbarHeight: 44,
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -649,10 +650,11 @@ class _MyPageState extends State<MyPage> {
               'assets/examtalk_logo.png',
               height: 30, // StudyPage랑 동일
             ),
-            const SizedBox(width: 3),
+            const SizedBox(width: 5),
             const Text(
               '마이페이지',
               style: TextStyle(
+                fontSize : 20,
                 fontWeight: FontWeight.bold,
                 color: Colors.black,
               ),
@@ -1215,9 +1217,15 @@ class _MyPageState extends State<MyPage> {
           children: [
             const Text('아직 올린 리뷰 사진이 없어요.', style: TextStyle(color: Colors.black54)),
             const SizedBox(height: 10),
-            OutlinedButton(
-              onPressed: _refreshMyGallery,
-              child: const Text('새로고침'),
+
+            Row(
+              children: [
+                const Spacer(),   // ✅ 왼쪽 공간 채우기 → 버튼이 오른쪽으로 감
+                OutlinedButton(
+                  onPressed: _refreshMyGallery,
+                  child: const Text('새로고침'),
+                ),
+              ],
             ),
           ],
         ),

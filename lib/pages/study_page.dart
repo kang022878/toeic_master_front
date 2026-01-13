@@ -980,6 +980,7 @@ class _StudyPageState extends State<StudyPage> with SingleTickerProviderStateMix
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
+        toolbarHeight: 44,
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -987,10 +988,11 @@ class _StudyPageState extends State<StudyPage> with SingleTickerProviderStateMix
               'assets/examtalk_logo.png',
               height: 30, // 🔹 작게
             ),
-            const SizedBox(width: 3),
+            const SizedBox(width: 5),
             const Text(
               '스터디',
               style: TextStyle(
+                fontSize : 20,
                 fontWeight: FontWeight.bold,
                 color: Colors.black,
               ),
@@ -1581,6 +1583,15 @@ class _StudyPageState extends State<StudyPage> with SingleTickerProviderStateMix
                 _buildSmallButton('회원 관리', () => _showMemberManagement(study)),
                 const SizedBox(width: 8),
                 _buildSmallButton('신규 가입 요청', () => _showApplicationRequests(study)),
+                const SizedBox(width: 8),
+                _buildSmallButton('삭제', () => _showDeleteStudyDialog(study), isDestructive: true),
+              ]),
+            ],
+            // ✅ 내가 참여한 스터디(내가 만든 것 제외)에만 나가기 버튼 표시
+            if (!isSearchTab && !isOwner) ...[
+              const SizedBox(height: 8),
+              Row(children: [
+                _buildSmallButton('나가기', () => _showLeaveStudyDialog(study)),
               ]),
             ],
           ],
@@ -1590,13 +1601,23 @@ class _StudyPageState extends State<StudyPage> with SingleTickerProviderStateMix
     );
   }
 
-  Widget _buildSmallButton(String label, VoidCallback onTap) {
+  Widget _buildSmallButton(String label, VoidCallback onTap, {bool isDestructive = false}) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(8)),
-        child: Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+        decoration: BoxDecoration(
+          color: isDestructive ? Colors.red[100] : Colors.grey[300],
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            color: isDestructive ? Colors.red : Colors.black,
+          ),
+        ),
       ),
     );
   }
@@ -1813,6 +1834,76 @@ class _StudyPageState extends State<StudyPage> with SingleTickerProviderStateMix
 
   void _showConfirmDialog(String message, VoidCallback onConfirm) {
     showDialog(context: context, builder: (context) => AlertDialog(content: Text(message), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소', style: TextStyle(color: Colors.grey))), TextButton(onPressed: () { Navigator.pop(context); onConfirm(); }, child: const Text('확인', style: TextStyle(color: Colors.green)))]));
+  }
+
+  void _showLeaveStudyDialog(Map<String, dynamic> study) {
+    final studyId = study['id'] as int;
+    final studyTitle = study['title'] ?? '스터디';
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('스터디 나가기'),
+        content: Text('\'$studyTitle\' 스터디에서 나가시겠습니까?\n\n나가면 채팅 내역을 더 이상 볼 수 없습니다.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('취소', style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              try {
+                await _api.leaveStudy(studyId);
+                _showSnack('스터디에서 나갔습니다.');
+                _loadMyStudies(); // 목록 새로고침
+              } catch (e) {
+                _showSnack('나가기 실패: ${_prettyError(e)}');
+              }
+            },
+            child: const Text('나가기', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteStudyDialog(Map<String, dynamic> study) {
+    final studyId = study['id'] as int;
+    final studyTitle = study['title'] ?? '스터디';
+    final currentMembers = study['currentMembers'] ?? 0;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('스터디 삭제'),
+        content: Text(
+          '\'$studyTitle\' 스터디를 삭제하시겠습니까?\n\n'
+          '${currentMembers > 1 ? '⚠️ 현재 ${currentMembers}명의 멤버가 있습니다.\n' : ''}'
+          '삭제하면 모든 채팅 내역과 데이터가 영구적으로 삭제됩니다.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('취소', style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              try {
+                await _api.deleteStudy(studyId);
+                _showSnack('스터디가 삭제되었습니다.');
+                _loadMyStudies(); // 목록 새로고침
+                _loadStudies(refresh: true); // 전체 목록도 새로고침
+              } catch (e) {
+                _showSnack('삭제 실패: ${_prettyError(e)}');
+              }
+            },
+            child: const Text('삭제', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showCreateStudyDialog() {

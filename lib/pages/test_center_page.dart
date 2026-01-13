@@ -1629,6 +1629,7 @@ class TestCenterPageState extends State<TestCenterPage> {
 
         Row(
           children: [
+            const Spacer(),
             IconButton(
               constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
               padding: EdgeInsets.zero,
@@ -1679,15 +1680,15 @@ class TestCenterPageState extends State<TestCenterPage> {
         required Color textColor,
       }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: borderColor, width: 1.4),
+        border: Border.all(color: borderColor, width: 1),
         color: Colors.transparent,
       ),
       child: Text(
         text,
-        style: TextStyle(color: textColor, fontWeight: FontWeight.w600),
+        style: TextStyle(fontSize: 12,color: textColor, fontWeight: FontWeight.w600),
       ),
     );
   }
