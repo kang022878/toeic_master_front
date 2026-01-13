@@ -5,7 +5,7 @@
 
 
     <application
-        android:label="toeic_master_front"
+        android:label="이그잼톡"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         

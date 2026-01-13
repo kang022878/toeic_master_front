@@ -1579,7 +1579,7 @@ class TestCenterPageState extends State<TestCenterPage> {
         const SizedBox(height: 10),
 
         Wrap(
-          spacing: 8,
+          spacing: 6,
           runSpacing: 8,
           children: [
             _pill(
