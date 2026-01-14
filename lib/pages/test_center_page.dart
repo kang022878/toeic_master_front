@@ -449,10 +449,11 @@ class TestCenterPageState extends State<TestCenterPage> {
   Future<List<School>> _fetchNearbySchools({
     required double lat,
     required double lng,
+    int radiusMeters = 100000000,
   }) async {
     final res = await _apiClient.dio.get(
       '/api/schools/nearby',
-      queryParameters: {'lat': lat, 'lng': lng},
+      queryParameters: {'lat': lat, 'lng': lng, 'radiusMeters': radiusMeters,},
     );
     final data = (res.data as Map<String, dynamic>)['data'] as List<dynamic>? ?? [];
     return data.map((e) => School.fromJson(e as Map<String, dynamic>)).toList();
@@ -1207,6 +1208,7 @@ class TestCenterPageState extends State<TestCenterPage> {
         final nearby = await _fetchNearbySchools(
           lat: pos.latitude,
           lng: pos.longitude,
+          radiusMeters: 100000000,
         );
         if (!mounted) return;
         await _applySchoolsToMap(nearby);
@@ -1876,13 +1878,14 @@ class TestCenterPageState extends State<TestCenterPage> {
                       const Text('교통은 어떤가요?', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 10),
                       Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           _toggleButton(
                             label: '자가용도 괜찮아요',
                             selected: accessible == true,
                             onTap: submitting ? () {} : () => setStateDialog(() => accessible = true),
                           ),
-                          const SizedBox(width: 10),
+                          const SizedBox(height: 10),
                           _toggleButton(
                             label: '대중교통을 추천해요',
                             selected: accessible == false,
@@ -1931,8 +1934,8 @@ class TestCenterPageState extends State<TestCenterPage> {
                       const Text('리뷰 쓰기', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 10),
                       TextField(
-                        minLines: 4,
-                        maxLines: 6,
+                        minLines: 8,
+                        maxLines: 20,
                         enabled: !submitting,
                         onChanged: (v) {
                           contentText = v;
