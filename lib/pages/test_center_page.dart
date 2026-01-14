@@ -21,6 +21,7 @@ class School {
   final double longitude;
   final double avgRating;
   final int reviewCount;
+  final String? evaluation;
 
   const School({
     required this.id,
@@ -30,6 +31,7 @@ class School {
     required this.longitude,
     required this.avgRating,
     required this.reviewCount,
+    required this.evaluation,
   });
 
   factory School.fromJson(Map<String, dynamic> json) {
@@ -41,6 +43,7 @@ class School {
       longitude: (json['longitude'] as num).toDouble(),
       avgRating: (json['avgRating'] as num?)?.toDouble() ?? 0.0,
       reviewCount: (json['reviewCount'] as num?)?.toInt() ?? 0,
+      evaluation: (json['evaluation'] as String?)?.trim(),
     );
   }
 }
@@ -117,9 +120,30 @@ class TestCenterPageState extends State<TestCenterPage> {
 
   bool _isLoggedIn = false;
 
-  /// 외부에서 호출 가능: 탭 진입 시 AI 추천 새로고침
-  void refreshAiRecommendations() {
-    _loadAiRecommendedSchools();
+  Future<void> _initAuthAndLoad() async {
+    final token = await TokenStorage().readAccessToken();
+    // ⚠️ 너 TokenStorage 함수명이 다르면 그 이름으로 바꿔줘야 함
+
+    final loggedIn = token != null && token.isNotEmpty;
+
+    if (!mounted) return;
+    setState(() => _isLoggedIn = loggedIn);
+
+    if (loggedIn) {
+      await _loadMyNicknameSilently();      // 닉네임은 있으면 좋고 없어도 됨
+      await _loadAiRecommendedSchools();    // ✅ 로그인 판정이 true니까 추천 불러옴
+    } else {
+      // 로그아웃 상태 정리
+      setState(() {
+        _myNickname = null;
+        _aiRecommendedSchools = [];
+        _isLoadingAiSchools = false;
+      });
+    }
+  }
+
+  void refreshAiRecommendations() async {
+    await _initAuthAndLoad(); // ✅ 로그인 상태 재판정 + 로드
   }
 
   NaverMapController? _mapController;
@@ -222,11 +246,8 @@ class TestCenterPageState extends State<TestCenterPage> {
     _api = Api(_apiClient);
 
     _loadMyPositionSilently();
-    _loadMyNicknameSilently().then((_) {
-      if (mounted && _isLoggedIn) {
-        _loadAiRecommendedSchools();
-      }
-    });
+
+    _initAuthAndLoad(); // ✅ 추가
 
     _searchController.addListener(_onSearchTextControllerChanged);
 
@@ -234,7 +255,6 @@ class TestCenterPageState extends State<TestCenterPage> {
       if (!_searchFocusNode.hasFocus) {
         setState(() => _showSuggestions = false);
       } else {
-        // 포커스 얻으면 현재 텍스트 기준으로 다시 후보 표시
         _updateSuggestions(_searchController.text);
       }
     });
@@ -1096,6 +1116,36 @@ class TestCenterPageState extends State<TestCenterPage> {
     );
   }
 
+  Widget _buildAiEvaluationLine(School school) {
+    final eval = (school.evaluation ?? '').trim();
+
+    final text = eval.isEmpty ? 'AI 요약이 아직 없어요' : 'AI 요약: $eval';
+
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF6FBF2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF8DBB6A), width: 1),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.auto_awesome, size: 16, color: Color(0xFF5E9B4B)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(fontSize: 13, color: Colors.black87, height: 1.25),
+              softWrap: true,              // 기본 true지만 명시해도 OK
+              overflow: TextOverflow.visible, // 안전하게
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _moveToMyLocation() async {
     if (_mapController == null) return;
 
@@ -1249,6 +1299,7 @@ class TestCenterPageState extends State<TestCenterPage> {
                                   '$distanceText · ${_guessRegionFromAddress(school.address)}',
                                   style: const TextStyle(fontSize: 14, color: Colors.black54),
                                 ),
+                                _buildAiEvaluationLine(school),
                                 const SizedBox(height: 14),
 
                                 Row(
